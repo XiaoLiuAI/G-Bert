@@ -1,5 +1,5 @@
-import json
 import copy
+import json
 
 
 class BertConfig(object):

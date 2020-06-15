@@ -2,28 +2,23 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import csv
-import os
-import logging
 import argparse
-import random
-from tqdm import tqdm, trange
-import dill
 import copy
-from collections import defaultdict
+import logging
+import os
+import random
 
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler, Dataset
-from torch.utils.data.distributed import DistributedSampler
-from torch.optim import Adam
 from tensorboardX import SummaryWriter
+from torch.optim import Adam
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Dataset
+from tqdm import tqdm, trange
 
-from utils import metric_report, t2n, get_n_params
 from config import BertConfig
 from predictive_models import GBERT_Pretrain
-from sklearn.metrics import jaccard_similarity_score, f1_score, roc_auc_score, average_precision_score
+from utils import metric_report, t2n, get_n_params
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -175,6 +170,9 @@ class EHRDataset(Dataset):
 
 
 def load_dataset(args):
+    """
+    加载数据集
+    """
     data_dir = args.data_dir
     max_seq_len = args.max_seq_length
 

@@ -2,17 +2,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-import copy
-import json
-import math
 import logging
+import math
+import os
 
 import torch
-from torch import nn
-from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 # from torch.nn import LayerNorm
 import torch.nn.functional as F
+from torch import nn
+
 from config import BertConfig
 from graph_models import FuseEmbeddings
 

@@ -2,28 +2,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from build_tree import build_icd9_tree, build_atc_tree
-import csv
-import os
 import logging
-import argparse
-import random
-from tqdm import tqdm, trange
-import dill
-from collections import defaultdict
+import os
 
-import numpy as np
-import pandas as pd
-import torch
-from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler, Dataset
-from torch.utils.data.distributed import DistributedSampler
-from torch.optim import Adam
-
-from utils import metric_report, t2n, get_n_params
-from config import BertConfig
+from build_tree import build_icd9_tree, build_atc_tree
 from predictive_models import TSNE
-
-from sklearn.metrics import jaccard_similarity_score, f1_score, roc_auc_score, average_precision_score
+from utils import get_n_params
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',

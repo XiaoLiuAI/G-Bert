@@ -1,8 +1,7 @@
-import random
-from sklearn.metrics import jaccard_similarity_score, roc_auc_score, precision_score, f1_score, average_precision_score
-import numpy as np
-import os
 import logging
+
+import numpy as np
+from sklearn.metrics import roc_auc_score, f1_score, average_precision_score
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
