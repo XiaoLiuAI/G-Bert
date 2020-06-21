@@ -3,13 +3,13 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import copy
 import logging
 import os
-import random
 
+import copy
 import numpy as np
 import pandas as pd
+import random
 import torch
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 
 class Voc(object):
+    """
+    正反词典
+    """
     def __init__(self):
         self.idx2word = {}
         self.word2idx = {}
@@ -39,6 +42,9 @@ class Voc(object):
 
 
 def random_word(tokens, vocab):
+    """
+    随机替换 token 为 MASK 或者别的词
+    """
     for i, _ in enumerate(tokens):
         prob = random.random()
         # mask token with 15% probability
@@ -60,17 +66,20 @@ def random_word(tokens, vocab):
 
 
 class EHRTokenizer(object):
-    """Runs end-to-end tokenization"""
+    """
+    Runs end-to-end tokenization
+    其实就是 token to idx 或者反过来
+    """
 
     def __init__(self, data_dir, special_tokens=("[PAD]", "[CLS]", "[MASK]")):
 
         self.vocab = Voc()
 
         # special tokens
-        self.vocab.add_sentence(special_tokens)
+        self.vocab.add_sentence(special_tokens)  # 全词典(药品+诊断)
 
-        self.rx_voc = self.add_vocab(os.path.join(data_dir, 'rx-vocab.txt'))
-        self.dx_voc = self.add_vocab(os.path.join(data_dir, 'dx-vocab.txt'))
+        self.rx_voc = self.add_vocab(os.path.join(data_dir, 'rx-vocab.txt'))  # 药品词典
+        self.dx_voc = self.add_vocab(os.path.join(data_dir, 'dx-vocab.txt'))  # 诊断词典
 
     def add_vocab(self, vocab_file):
         voc = self.vocab
@@ -97,6 +106,11 @@ class EHRTokenizer(object):
 
 
 class EHRDataset(Dataset):
+    """
+    数据集，元素为 x, y1, y2
+    y1: one-hot 当次诊断
+    y2: one-hot 当次用药
+    """
     def __init__(self, data_pd, tokenizer: EHRTokenizer, max_seq_len):
         self.data_pd = data_pd
         self.tokenizer = tokenizer
@@ -111,7 +125,7 @@ class EHRDataset(Dataset):
             """
             admissions = []
             for _, row in data.iterrows():
-                admission = [list(row['ICD9_CODE']), list(row['ATC4'])]
+                admission = [list(row['ICD9_CODE']), list(row['ATC4'])]  # 单次就诊的 诊断 和 药物
                 admissions.append(admission)
             return admissions
 
@@ -122,27 +136,30 @@ class EHRDataset(Dataset):
 
     def __getitem__(self, item):
         cur_id = item
-        adm = copy.deepcopy(self.admissions[item])
+        adm = copy.deepcopy(self.admissions[item])  # 原始数据
 
         def fill_to_max(l, seq):
             while len(l) < seq:
                 l.append('[PAD]')
             return l
         """y
+        one-hot 原始输入数据作为预测目标
         """
-        y_dx = np.zeros(len(self.tokenizer.dx_voc.word2idx))
-        y_rx = np.zeros(len(self.tokenizer.rx_voc.word2idx))
+        y_dx = np.zeros(len(self.tokenizer.dx_voc.word2idx))  # 诊断 one-hot
+        y_rx = np.zeros(len(self.tokenizer.rx_voc.word2idx))  # 药品 one-hot
         for item in adm[0]:
             y_dx[self.tokenizer.dx_voc.word2idx[item]] = 1
         for item in adm[1]:
             y_rx[self.tokenizer.rx_voc.word2idx[item]] = 1
 
         """replace tokens with [MASK]
+        随机替换输入数据
         """
         adm[0] = random_word(adm[0], self.tokenizer.rx_voc)
         adm[1] = random_word(adm[1], self.tokenizer.dx_voc)
 
         """extract input and output tokens
+        [cls]+[诊断]+[cls]+[药品]
         """
         random_word
         input_tokens = []  # (2*max_len)
@@ -162,6 +179,7 @@ class EHRDataset(Dataset):
             logger.info("input_ids: %s" %
                         " ".join([str(x) for x in input_ids]))
 
+        # 2 * seq_len, vocab diagnosis, vocab medication, TODO 为什么view是 2 * seq_len?
         cur_tensors = (torch.tensor(input_ids, dtype=torch.long).view(-1, self.seq_len),
                        torch.tensor(y_dx, dtype=torch.float),
                        torch.tensor(y_rx, dtype=torch.float))
@@ -180,6 +198,8 @@ def load_dataset(args):
     tokenizer = EHRTokenizer(data_dir)
 
     # load data
+    # multi-visit: 一人有多次就诊
+    # single-visit: 一人只有一次就诊
     data_multi = pd.read_pickle(os.path.join(
         data_dir, 'data-multi-visit.pkl')).iloc[:, :4]
     data_single = pd.read_pickle(
@@ -192,6 +212,8 @@ def load_dataset(args):
 
     def load_ids(data, file_name):
         """
+        通过 ids 来分割数据集,分割成train,eval,test, 使用的是subject_id,也就是患者id
+        所以数据集是按照患者id来进行区分的,非常棒,避免data leak
         :param data: multi-visit data
         :param file_name:
         :return: raw data form
@@ -205,6 +227,11 @@ def load_dataset(args):
     #     EHRDataset(load_ids(data_multi, ids_file[1]), tokenizer, max_seq_len), \
     #     EHRDataset(load_ids(data_multi, ids_file[1]), tokenizer, max_seq_len), \
     #     EHRDataset(load_ids(data_multi, ids_file[2]), tokenizer, max_seq_len)
+    """
+    train-id 返回的是data_single+data_multi train-id.txt TODO why ?
+    eval-id 返回的是data_multi eval-id.txt 
+    test-id 返回的是data_multi test-id.txt 
+    """
     return tokenizer, \
         EHRDataset(pd.concat([data_single, load_ids(
             data_multi, ids_file[0])]), tokenizer, max_seq_len), \
