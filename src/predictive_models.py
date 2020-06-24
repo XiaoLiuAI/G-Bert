@@ -64,10 +64,16 @@ class TSNE(PreTrainedBertModel):
 
 
 class ClsHead(nn.Module):
+    """
+    hidden_size -> hidden_size -> vocab size 两层前馈神经网络
+    """
     def __init__(self, config: BertConfig, voc_size):
         super(ClsHead, self).__init__()
-        self.cls = nn.Sequential(nn.Linear(config.hidden_size, config.hidden_size), nn.ReLU(
-        ), nn.Linear(config.hidden_size, voc_size))
+        self.cls = nn.Sequential(
+            nn.Linear(config.hidden_size, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, voc_size)
+        )
 
     def forward(self, input):
         return self.cls(input)
@@ -86,12 +92,17 @@ class SelfSupervisedHead(nn.Module):
 
 
 class GBERT_Pretrain(PreTrainedBertModel):
+    """
+    组合BERT+SelfSupervisedHead layer
+    """
     def __init__(self, config: BertConfig, dx_voc=None, rx_voc=None):
         super(GBERT_Pretrain, self).__init__(config)
         self.dx_voc_size = len(dx_voc.word2idx)
         self.rx_voc_size = len(rx_voc.word2idx)
 
+        # graph的部分在embedding中实现
         self.bert = BERT(config, dx_voc, rx_voc)
+        # classification layer for pretraining tasks
         self.cls = SelfSupervisedHead(
             config, self.dx_voc_size, self.rx_voc_size)
 
@@ -100,16 +111,21 @@ class GBERT_Pretrain(PreTrainedBertModel):
     def forward(self, inputs, dx_labels=None, rx_labels=None):
         # inputs (B, 2, max_len)
         # bert_pool (B, hidden)
+        # 同一个bert处理药和诊断的idx, embedding怎么区分？第二个参数都是0有什么意思？
+        # 第二个参数应该是token_type_ids，应该是0或1,而不是全都是zeros
         _, dx_bert_pool = self.bert(inputs[:, 0, :], torch.zeros(
             (inputs.size(0), inputs.size(2))).long().to(inputs.device))
         _, rx_bert_pool = self.bert(inputs[:, 1, :], torch.zeros(
             (inputs.size(0), inputs.size(2))).long().to(inputs.device))
+        # TODO token_types_ids 都是0,有问题
+        # _, rx_bert_pool = self.bert(inputs[:, 1, :], torch.ones(
+        #     (inputs.size(0), inputs.size(2))).long().to(inputs.device))
 
         dx2dx, rx2dx, dx2rx, rx2rx = self.cls(dx_bert_pool, rx_bert_pool)
         # output logits
-        if rx_labels is None or dx_labels is None:
+        if rx_labels is None or dx_labels is None:  # 如果标签是None，就是做prediction
             return F.sigmoid(dx2dx), F.sigmoid(rx2dx), F.sigmoid(dx2rx), F.sigmoid(rx2rx)
-        else:
+        else:  # 标签非None，就要计算loss TODO 把loss放到forward里面，代码结构上是不对的. 输出和label的形状貌似不太合?
             loss = F.binary_cross_entropy_with_logits(dx2dx, dx_labels) + \
                 F.binary_cross_entropy_with_logits(rx2dx, dx_labels) + \
                 F.binary_cross_entropy_with_logits(dx2rx, rx_labels) + \
@@ -128,6 +144,9 @@ class MappingHead(nn.Module):
 
 
 class GBERT_Predict(PreTrainedBertModel):
+    """
+    序列预测模型
+    """
     def __init__(self, config: BertConfig, tokenizer):
         super(GBERT_Predict, self).__init__(config)
         self.bert = BERT(config, tokenizer.dx_voc, tokenizer.rx_voc)
@@ -168,7 +187,7 @@ class GBERT_Predict(PreTrainedBertModel):
 
         rx_logits = torch.cat(rx_logits, dim=0)
         loss = F.binary_cross_entropy_with_logits(rx_logits, rx_labels)
-        return loss, rx_logits
+        return loss, rx_logits  # TODO 为什么只返回rx，不返回dx?
 
 
 class GBERT_Predict_Side(PreTrainedBertModel):

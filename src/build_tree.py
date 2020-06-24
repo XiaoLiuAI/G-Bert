@@ -10,6 +10,7 @@ def _remove_duplicate(input):
 
 def build_stage_one_edges(res, graph_voc):
     """
+    返回graph,实际上是返回edges
     :param res:
     :param graph_voc:
     :return: edge_idx [[1,2,3],[0,1,0]]
@@ -19,7 +20,7 @@ def build_stage_one_edges(res, graph_voc):
         sample_idx = list(map(lambda x: graph_voc.word2idx[x], sample))
         for i in range(len(sample_idx) - 1):
             # only direct children -> ancestor
-            edge_idx.append((sample_idx[i+1], sample_idx[i]))
+            edge_idx.append((sample_idx[i+1], sample_idx[i]))  # 建立数据中出现的code对应node的上下级关系
             #
             # # self-loop except leaf node
             # if i != 0:
@@ -33,6 +34,7 @@ def build_stage_one_edges(res, graph_voc):
 
 def build_stage_two_edges(res, graph_voc):
     """
+    返回graph,实际上是返回edges,但是直接返回ancestor到leaf的path，ancestor之间的edge不返回
     :param res:
     :param graph_voc:
     :return: edge_idx [[1,2,3],[0,1,0]]
@@ -86,8 +88,7 @@ ICD-9
 """
 
 
-def expand_level2():
-    level2 = ['001-009', '010-018', '020-027', '030-041', '042', '045-049', '050-059', '060-066', '070-079', '080-088',
+level2 = ['001-009', '010-018', '020-027', '030-041', '042', '045-049', '050-059', '060-066', '070-079', '080-088',
               '090-099', '100-104', '110-118', '120-129', '130-136', '137-139', '140-149', '150-159', '160-165',
               '170-176',
               '176', '179-189', '190-199', '200-208', '209', '210-229', '230-234', '235-238', '239', '240-246',
@@ -114,28 +115,32 @@ def expand_level2():
               'E840-E845', 'E846-E849', 'E850-E858', 'E860-E869', 'E870-E876', 'E878-E879', 'E880-E888', 'E890-E899',
               'E900-E909', 'E910-E915', 'E916-E928', 'E929', 'E930-E949', 'E950-E959', 'E960-E969', 'E970-E978',
               'E980-E989', 'E990-E999']
+level2_expand = {}
 
-    level2_expand = {}
-    for i in level2:
-        tokens = i.split('-')
-        if i[0] == 'V':
-            if len(tokens) == 1:
-                level2_expand[i] = i
+
+def expand_level2():
+    # icd9 2位码
+    if len(level2_expand) == 0:
+        for i in level2:
+            tokens = i.split('-')
+            if i[0] == 'V':
+                if len(tokens) == 1:
+                    level2_expand[i] = i  # V90 - V90
+                else:
+                    for j in range(int(tokens[0][1:]), int(tokens[1][1:]) + 1):
+                        level2_expand["V%02d" % j] = i  # V30,V31,V32,... - V30-V39
+            elif i[0] == 'E':
+                if len(tokens) == 1:
+                    level2_expand[i] = i
+                else:
+                    for j in range(int(tokens[0][1:]), int(tokens[1][1:]) + 1):
+                        level2_expand["E%03d" % j] = i
             else:
-                for j in range(int(tokens[0][1:]), int(tokens[1][1:]) + 1):
-                    level2_expand["V%02d" % j] = i
-        elif i[0] == 'E':
-            if len(tokens) == 1:
-                level2_expand[i] = i
-            else:
-                for j in range(int(tokens[0][1:]), int(tokens[1][1:]) + 1):
-                    level2_expand["E%03d" % j] = i
-        else:
-            if len(tokens) == 1:
-                level2_expand[i] = i
-            else:
-                for j in range(int(tokens[0]), int(tokens[1]) + 1):
-                    level2_expand["%03d" % j] = i
+                if len(tokens) == 1:
+                    level2_expand[i] = i
+                else:
+                    for j in range(int(tokens[0]), int(tokens[1]) + 1):
+                        level2_expand["%03d" % j] = i
     return level2_expand
 
 
@@ -147,9 +152,9 @@ def build_icd9_tree(unique_codes):
     level3_dict = expand_level2()
     for code in unique_codes:
         level1 = code
-        level2 = level1[:4] if level1[0] == 'E' else level1[:3]
-        level3 = level3_dict[level2]
-        level4 = root_node
+        level2 = level1[:4] if level1[0] == 'E' else level1[:3]  # 四位码
+        level3 = level3_dict[level2]  # 4-3位码的映射
+        level4 = root_node  # 根节点, 为啥要加这个？
 
         sample = [level1, level2, level3, level4]
 
@@ -170,9 +175,9 @@ def build_atc_tree(unique_codes):
 
     root_node = 'atc_root'
     for code in unique_codes:
-        sample = [code] + [code[:i] for i in [4, 3, 1]] + [root_node]
+        sample = [code] + [code[:i] for i in [4, 3, 1]] + [root_node]  # 1，3，4 位码
 
-        graph_voc.add_sentence(sample)
+        graph_voc.add_sentence(sample)  # 词典
         res.append(sample)
 
     return res, graph_voc

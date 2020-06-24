@@ -187,6 +187,7 @@ class BertEmbeddings(nn.Module):
 class PreTrainedBertModel(nn.Module):
     """ An abstract class to handle weights initialization and
         a simple interface for dowloading and loading pretrained models.
+        主要是实现加载pretrained model的功能
     """
 
     def __init__(self, config: BertConfig, *inputs, **kwargs):
@@ -272,6 +273,8 @@ class PreTrainedBertModel(nn.Module):
 class BERT(PreTrainedBertModel):
     """
     BERT model : Bidirectional Encoder Representations from Transformers.
+
+    FuseEmbeddings + Transformers
     """
 
     def __init__(self, config: BertConfig, dx_voc=None, rx_voc=None):
@@ -307,7 +310,7 @@ class BERT(PreTrainedBertModel):
         mask = (x > 1).unsqueeze(1).repeat(1, x.size(1), 1).unsqueeze(1)
 
         # embedding the indexed sequence to sequence of vectors
-        x = self.embedding(x, token_type_ids)
+        x = self.embedding(x, token_type_ids)  # 每次运行都会运行forward
 
         # running over multiple transformer blocks
         for transformer in self.transformer_blocks:

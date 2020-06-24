@@ -179,7 +179,8 @@ class EHRDataset(Dataset):
             logger.info("input_ids: %s" %
                         " ".join([str(x) for x in input_ids]))
 
-        # 2 * seq_len, vocab diagnosis, vocab medication, TODO 为什么view是 2 * seq_len?
+        # 2 * seq_len, vocab diagnosis, vocab medication
+        # 2 * seq_len 是区分诊断和药，把这两种信息分别放在两个独立的序列里面
         cur_tensors = (torch.tensor(input_ids, dtype=torch.long).view(-1, self.seq_len),
                        torch.tensor(y_dx, dtype=torch.float),
                        torch.tensor(y_rx, dtype=torch.float))
@@ -399,7 +400,7 @@ def main():
             print('')
             tr_loss = 0
             nb_tr_examples, nb_tr_steps = 0, 0
-            prog_iter = tqdm(train_dataloader, leave=False, desc='Training')
+            prog_iter = tqdm(train_dataloader, leave=False, desc='Training')  # 命令行进度条
             model.train()
             for _, batch in enumerate(prog_iter):
                 batch = tuple(t.to(device) for t in batch)

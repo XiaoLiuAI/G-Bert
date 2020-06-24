@@ -1,22 +1,29 @@
-import inspect
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.inits import glorot, zeros
-from torch_geometric.utils import scatter_, softmax, add_self_loops
+from torch_geometric.utils import softmax, add_self_loops
 
 from build_tree import build_icd9_tree, build_atc_tree
 from build_tree import build_stage_one_edges, build_stage_two_edges
 
 
 class OntologyEmbedding(nn.Module):
+    """
+    并不是单纯的Embedding，包含图模型
+    """
     def __init__(self, voc, build_tree_func,
                  in_channels=100, out_channels=20, heads=5):
         super(OntologyEmbedding, self).__init__()
 
         # initial tree edges
         res, graph_voc = build_tree_func(list(voc.idx2word.values()))
+        """
+        res: list of sample, while each sample represents the raw code and sub codes 
+            which could be used as nodes in code graph
+        graph_voc: vocabulary of nodes/codes in samples in res
+        """
         stage_one_edges = build_stage_one_edges(res, graph_voc)
         stage_two_edges = build_stage_two_edges(res, graph_voc)
 
@@ -32,6 +39,7 @@ class OntologyEmbedding(nn.Module):
 
         # tree embedding
         num_nodes = len(graph_voc.word2idx)
+        # 包括路径上的节点的embedding，超过实际code的数量
         self.embedding = nn.Parameter(torch.Tensor(num_nodes, in_channels))
 
         # idx mapping: FROM leaf node in graphvoc TO voc
@@ -42,98 +50,26 @@ class OntologyEmbedding(nn.Module):
 
     def get_all_graph_emb(self):
         emb = self.embedding
+        """
+        对所有nodes，所有edges进行图卷积(MessagePassing)操作
+        """
         emb = self.g(self.g(emb, self.edges1.to(emb.device)),
                      self.edges2.to(emb.device))
         return emb
 
     def forward(self):
         """
-        :param idxs: [N, L]
+        每次都会对所有nodes调用graph attention network.
+        运行效率有点低
+        :param idx: [N, L]
         :return:
         """
-        emb = self.embedding
-
-        emb = self.g(self.g(emb, self.edges1.to(emb.device)),
-                     self.edges2.to(emb.device))
+        emb = self.get_all_graph_emb()
 
         return emb[self.idx_mapping]
 
     def init_params(self):
         glorot(self.embedding)
-
-
-class MessagePassing(nn.Module):
-    r"""Base class for creating message passing layers
-
-    .. math::
-        \mathbf{x}_i^{\prime} = \gamma_{\mathbf{\Theta}} \left( \mathbf{x}_i,
-        \square_{j \in \mathcal{N}(i)} \, \phi_{\mathbf{\Theta}}
-        \left(\mathbf{x}_i, \mathbf{x}_j,\mathbf{e}_{i,j}\right) \right),
-
-    where :math:`\square` denotes a differentiable, permutation invariant
-    function, *e.g.*, sum, mean or max, and :math:`\gamma_{\mathbf{\Theta}}`
-    and :math:`\phi_{\mathbf{\Theta}}` denote differentiable functions such as
-    MLPs.
-    See `here <https://rusty1s.github.io/pytorch_geometric/build/html/notes/
-    create_gnn.html>`__ for the accompanying tutorial.
-
-    """
-
-    def __init__(self, aggr='add'):
-        super(MessagePassing, self).__init__()
-
-        self.message_args = inspect.getargspec(self.message)[0][1:]
-        self.update_args = inspect.getargspec(self.update)[0][2:]
-
-    def propagate(self, aggr, edge_index, **kwargs):
-        r"""The initial call to start propagating messages.
-        Takes in an aggregation scheme (:obj:`"add"`, :obj:`"mean"` or
-        :obj:`"max"`), the edge indices, and all additional data which is
-        needed to construct messages and to update node embeddings."""
-
-        assert aggr in ['add', 'mean', 'max']
-        kwargs['edge_index'] = edge_index
-
-        size = None
-        message_args = []
-        for arg in self.message_args:
-            if arg[-2:] == '_i':
-                tmp = kwargs[arg[:-2]]
-                size = tmp.size(0)
-                message_args.append(tmp[edge_index[0]])
-            elif arg[-2:] == '_j':
-                tmp = kwargs[arg[:-2]]
-                size = tmp.size(0)
-                message_args.append(tmp[edge_index[1]])
-            else:
-                message_args.append(kwargs[arg])
-
-        update_args = [kwargs[arg] for arg in self.update_args]
-
-        out = self.message(*message_args)
-        out = scatter_(aggr, out, edge_index[0], dim_size=size)
-        out = self.update(out, *update_args)
-
-        return out
-
-    def message(self, x_j):  # pragma: no cover
-        r"""Constructs messages in analogy to :math:`\phi_{\mathbf{\Theta}}`
-        for each edge in :math:`(i,j) \in \mathcal{E}`.
-        Can take any argument which was initially passed to :meth:`propagate`.
-        In addition, features can be lifted to the source node :math:`i` and
-        target node :math:`j` by appending :obj:`_i` or :obj:`_j` to the
-        variable name, *.e.g.* :obj:`x_i` and :obj:`x_j`."""
-
-        return x_j
-
-    def update(self, aggr_out):  # pragma: no cover
-        r"""Updates node embeddings in analogy to
-        :math:`\gamma_{\mathbf{\Theta}}` for each node
-        :math:`i \in \mathcal{V}`.
-        Takes in the output of aggregation as first argument and any argument
-        which was initially passed to :meth:`propagate`."""
-
-        return aggr_out
 
 
 class GATConv(MessagePassing):
@@ -192,6 +128,7 @@ class GATConv(MessagePassing):
 
         self.weight = nn.Parameter(
             torch.Tensor(in_channels, heads * out_channels))
+        # attention layer的参数,attention layer为一个单层神经网络,激活函数为LeakyReLU
         self.att = nn.Parameter(torch.Tensor(1, heads, 2 * out_channels))
 
         if bias and concat:
@@ -209,23 +146,45 @@ class GATConv(MessagePassing):
         zeros(self.bias)
 
     def forward(self, x, edge_index):
-        """"""
-        edge_index = add_self_loops(edge_index, num_nodes=x.size(0))
-        x = torch.mm(x, self.weight).view(-1, self.heads, self.out_channels)
-        return self.propagate('add', edge_index, x=x, num_nodes=x.size(0))
+        """
+        x: N * in_channels, all nodes embeddings
+        edge_index: 2 * E, all edges
+        """
+        edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))  # 加上当前node的self edge
 
-    def message(self, x_i, x_j, edge_index, num_nodes):
+        # 线性层, x: N * head * out_channels
+        x = torch.mm(x, self.weight).view(-1, self.heads, self.out_channels)
+        # return self.propagate('add', edge_index, x=x, num_nodes=x.size(0))  # 返回conv的结果,并不会更新node
+        return self.propagate(edge_index, aggr="add", x=x, size=(x.size(0), x.size(0)),
+                              num_nodes=x.size(0), pass_edge_index=edge_index)  # 返回conv的结果,并不会更新node
+
+    def message(self, x_i, x_j, pass_edge_index, num_nodes):
+        """
+        x_i: (E x head x out_channels)
+        x_j: (E x head x out_channels)
+        pass_edge_index: 2 * E TODO 新的pytorch_geometric框架不认同这种做法
+        num_nodes: embedding size
+
+        return: 注意力权重相乘下的特征
+        """
         # Compute attention coefficients.
+        # compute multi head attention based on head and tail nodes
+        # E * head
         alpha = (torch.cat([x_i, x_j], dim=-1) * self.att).sum(dim=-1)
         alpha = F.leaky_relu(alpha, self.negative_slope)
-        alpha = softmax(alpha, edge_index[0], num_nodes)
+        alpha = softmax(alpha, pass_edge_index[0], num_nodes)
 
         alpha = F.dropout(alpha, p=self.dropout)
 
+        # (E * head * out_channels) * (E * head) 每个head采用不同attention权重
         return x_j * alpha.view(-1, self.heads, 1)
 
     def update(self, aggr_out):
-        if self.concat is True:
+        """
+        aggr_out: N * head * out_channels
+        return: N * out_channels/(head * out_channels)
+        """
+        if self.concat is True:  # 决定多head是合并还是取均值
             aggr_out = aggr_out.view(-1, self.heads * self.out_channels)
         else:
             aggr_out = aggr_out.mean(dim=1)
@@ -258,6 +217,7 @@ class ConcatEmbeddings(nn.Module):
         self.init_params()
 
     def forward(self, input_ids):
+        # 每次调用 OntologyEmbedding 的 forward
         emb = torch.cat(
             [self.special_embedding, self.rx_embedding(), self.dx_embedding()], dim=0)
         return emb[input_ids]

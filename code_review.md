@@ -23,3 +23,44 @@ y2 = [0, 1]  # one-hot 药品
 
 ## 数据预处理
 
+## 模型
+`predictive_models.py`
+
+# 模型
+1. bert_models
+2. graph_models
+3. predictive_models
+
+## 类型继承
+- bert_models.py
+    - PreTrainedBertModel
+    - BERT(PreTrainedBertModel)
+        - embedding = FuseEmbeddings
+    
+- predictive_models.py
+    - GBERT_Pretrain(PreTrainedBertModel)
+        - bert = BERT
+    - GBERT_Predict(PreTrainedBertModel)
+    
+- graph_models.py
+    - OntologyEmbedding
+        - graph generation
+        - g = GATConv
+    - ConcatEmbeddings
+        - rx_embedding = OntologyEmbedding
+        - dx_embedding = OntologyEmbedding
+    - FuseEmbeddings
+        - ontology_embedding = ConcatEmbeddings 
+    
+*Question 1: 是不是每次embedding取数的时候都会启动GATConv？*
+
+Answer: 是
+
+*Question 2: pytorch_geometric包和GATConv的实现细节以及代码逻辑*
+
+pytorch_geometric 实现了 message passing 的机制. 原理是把neighbor的信息aggregate到中心node上.
+基础类MessagePassing实现了整个meta算法,使用者自己定义message 和 update 两个函数.
+
+`message` 接受两个node和一个edge(即三元组),定义neighbor传导给node的信息.
+
+`update` 定义怎么根据node本身以及传导的信息来更新node. 返回更新值,但是并不对embedding本身直接进行更新.
